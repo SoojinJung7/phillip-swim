@@ -101,14 +101,32 @@ values
 on conflict (id) do nothing;
 
 -- ===========================================================================
--- RLS 참고 (실서비스 전 적용 권장) — 필요 시 주석 해제 후 조정하세요.
+-- RLS(Row Level Security) — 실서비스 전 반드시 적용 권장
 -- ---------------------------------------------------------------------------
--- alter table public.members       enable row level security;
--- alter table public.swim_classes  enable row level security;
--- alter table public.reservations  enable row level security;
--- alter table public.waitlist      enable row level security;
+-- ⚠️ 왜 필요한가요?
+--   NEXT_PUBLIC_SUPABASE_ANON_KEY 는 브라우저에 노출되는 공개 키입니다.
+--   RLS 를 켜지 않으면, 이 키만으로 누구나 Supabase REST API 를 직접 호출해
+--   예약·대기·회원 데이터를 열람/수정할 수 있습니다.
 --
--- 예: 강습은 누구나 읽기 가능, 쓰기는 관리자만 (별도 인증 연동 필요)
--- create policy "swim_classes_read" on public.swim_classes
---   for select using (true);
+-- ✅ 권장 구성
+--   1) 아래 블록을 실행해 모든 테이블에 RLS 를 켭니다.
+--   2) 서버(this app)는 SUPABASE_SERVICE_ROLE_KEY 로 접속합니다.
+--      service_role 키는 RLS 를 우회하므로 앱의 정상 동작은 그대로 유지되고,
+--      브라우저에 노출된 anon 키로는 아래 정책만 허용됩니다.
+--   3) service_role 키는 절대 NEXT_PUBLIC_ 접두사를 붙이지 마세요(서버 전용).
+--
+-- 아래 전체를 그대로 실행하면 됩니다.
+-- ---------------------------------------------------------------------------
+alter table public.members       enable row level security;
+alter table public.swim_classes  enable row level security;
+alter table public.reservations  enable row level security;
+alter table public.waitlist      enable row level security;
+
+-- 강습 목록은 공개 읽기 허용(비로그인 방문자도 강습을 볼 수 있게).
+create policy "swim_classes_public_read" on public.swim_classes
+  for select using (true);
+
+-- members / reservations / waitlist 에는 anon 정책을 만들지 않습니다.
+-- → anon 키로는 접근 불가, 서버의 service_role 키로만 읽기/쓰기 가능.
+--   (이 앱의 예약·대기·회원 처리는 전부 서버에서 이뤄지므로 문제없습니다.)
 -- ===========================================================================
