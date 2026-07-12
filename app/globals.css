@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply text-slate-800 antialiased;
+    min-height: 100vh;
+    /* 잔잔한 물빛 그라데이션 배경 */
+    background:
+      radial-gradient(
+        1100px 600px at 15% -10%,
+        rgba(32, 188, 255, 0.18),
+        transparent 60%
+      ),
+      radial-gradient(
+        900px 500px at 100% 0%,
+        rgba(29, 228, 200, 0.16),
+        transparent 55%
+      ),
+      linear-gradient(180deg, #eff9ff 0%, #f4fdfb 45%, #ffffff 100%);
+    background-attachment: fixed;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+  }
+}
+
+@layer utilities {
+  /* 모바일 우선 콘텐츠 컨테이너 */
+  .container-app {
+    @apply mx-auto w-full max-w-3xl px-4 sm:px-6;
+  }
+
+  /* 물빛 텍스트 그라데이션 */
+  .text-gradient-water {
+    @apply bg-gradient-to-r from-water-600 to-teal-500 bg-clip-text text-transparent;
+  }
+}
+
+/* 커스텀 스크롤바 (선택적, 데스크톱) */
+@media (pointer: fine) {
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(0, 129, 204, 0.25);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 129, 204, 0.4);
+  }
+}
