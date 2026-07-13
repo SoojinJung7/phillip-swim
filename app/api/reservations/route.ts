@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentMember } from "@/lib/auth";
 import { createReservation } from "@/lib/data";
+import { notifyReservationConfirmed } from "@/lib/notify";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +40,11 @@ export async function POST(request: Request) {
     name: member.name,
     phone: member.phone,
   });
+
+  // 예약 확정 시 카카오 알림톡(best-effort). 미설정이면 조용히 생략됩니다.
+  if (result.ok) {
+    await notifyReservationConfirmed(result.reservation);
+  }
 
   return NextResponse.json(result, { status: 200 });
 }

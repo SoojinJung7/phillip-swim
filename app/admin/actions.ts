@@ -15,6 +15,7 @@ import {
   cancelReservation,
   callNextWaitlist,
 } from "@/lib/data";
+import { notifyWaitlistCalled } from "@/lib/notify";
 import type { SwimClass, WaitlistEntry } from "@/lib/types";
 
 export type ClassFormState = { error?: string };
@@ -127,6 +128,10 @@ export async function callNextAction(
   if (!member?.isAdmin)
     return { ok: false, error: "관리자 권한이 필요합니다." };
   const entry = await callNextWaitlist(classId);
+  // 대기자 호출 시 카카오 알림톡(best-effort). 미설정이면 조용히 생략됩니다.
+  if (entry) {
+    await notifyWaitlistCalled(entry);
+  }
   revalidatePath(`/admin/classes/${classId}`);
   revalidatePath("/admin");
   return { ok: true, entry };
