@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getCurrentMember, logout } from "@/lib/auth";
 import { cancelReservation, getReservationsByMember } from "@/lib/data";
+import { notifyReservationConfirmed } from "@/lib/notify";
 
 function safeReturnTo(raw: string): string {
   if (!raw) return "/";
@@ -31,6 +32,10 @@ export async function cancelReservationAction(
   const mine = await getReservationsByMember(member.id);
   if (!mine.some((r) => r.id === id)) return;
 
-  await cancelReservation(id);
+  // 취소로 자리가 나면 대기 1번이 자동 예약전환됩니다. 전환되면 확정 알림톡 발송.
+  const promoted = await cancelReservation(id);
+  if (promoted) {
+    await notifyReservationConfirmed(promoted);
+  }
   revalidatePath("/mypage");
 }

@@ -263,10 +263,60 @@ const mockImpl = {
     return { ok: true, reservation };
   },
 
-  async cancelReservation(id: string): Promise<void> {
+  // 예약 취소. 취소로 자리가 나면 대기 1번을 자동으로 예약 확정 전환하고,
+  // 새로 만들어진 예약을 반환합니다(승격 없으면 null).
+  async cancelReservation(id: string): Promise<Reservation | null> {
     const store = getMockStore();
     const resv = store.reservations.find((r) => r.id === id);
-    if (resv) resv.status = "cancelled";
+    // 없거나 이미 취소된 예약이면 자리가 나지 않으므로 승격 없음
+    if (!resv || resv.status !== "confirmed") return null;
+    resv.status = "cancelled";
+
+    const classId = resv.classId;
+
+    // 정말 자리가 비었는지 확인(안전장치)
+    const availability = await this.getAvailability(classId);
+    if (availability.isFull) return null;
+
+    // 대기 1번(대기 중, 최소 순번)
+    const next = store.waitlist
+      .filter((w) => w.classId === classId && w.status === "waiting")
+      .sort((a, b) => a.position - b.position)[0];
+    if (!next) return null;
+
+    // 대기 → 전환 처리 + 남은 대기 순번 재정렬
+    next.status = "converted";
+    const remaining = store.waitlist
+      .filter(
+        (w) =>
+          w.classId === classId &&
+          (w.status === "waiting" || w.status === "called")
+      )
+      .sort((a, b) => a.position - b.position);
+    remaining.forEach((w, i) => {
+      w.position = i + 1;
+    });
+
+    // 이미 확정 예약이 있으면 중복 생성 방지(대기만 정리하고 종료)
+    const alreadyConfirmed = store.reservations.some(
+      (r) =>
+        r.classId === classId &&
+        r.memberId === next.memberId &&
+        r.status === "confirmed"
+    );
+    if (alreadyConfirmed) return null;
+
+    const reservation: Reservation = {
+      id: makeId("resv"),
+      classId,
+      memberId: next.memberId,
+      memberName: next.memberName,
+      memberPhone: next.memberPhone,
+      status: "confirmed",
+      createdAt: nowIso(),
+    };
+    store.reservations.push(reservation);
+    return reservation;
   },
 
   async listWaitlist(classId: string): Promise<WaitlistEntry[]> {
@@ -574,13 +624,99 @@ const supabaseImpl = {
     return { ok: true, reservation: rowToReservation(data) };
   },
 
-  async cancelReservation(id: string): Promise<void> {
+  // 예약 취소 + 대기 1번 자동 예약전환. 승격된 예약을 반환(없으면 null).
+  async cancelReservation(id: string): Promise<Reservation | null> {
     const client = requireClient();
-    const { error } = await client
+
+    // 취소 대상 조회(확정 상태였는지 + classId 확보)
+    const { data: target, error: getErr } = await client
+      .from("reservations")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (getErr) throw getErr;
+    // 없거나 이미 취소됐으면 자리가 나지 않으므로 승격 없음
+    if (!target || target.status !== "confirmed") return null;
+
+    const { error: updErr } = await client
       .from("reservations")
       .update({ status: "cancelled" })
       .eq("id", id);
-    if (error) throw error;
+    if (updErr) throw updErr;
+
+    const classId = target.class_id as string;
+
+    // 정말 자리가 비었는지 확인(안전장치)
+    const availability = await this.getAvailability(classId);
+    if (availability.isFull) return null;
+
+    // 대기 1번(대기 중, 최소 순번)
+    const { data: next, error: nextErr } = await client
+      .from("waitlist")
+      .select("*")
+      .eq("class_id", classId)
+      .eq("status", "waiting")
+      .order("position", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (nextErr) throw nextErr;
+    if (!next) return null;
+
+    // 이미 확정 예약이 있으면 중복 생성 방지
+    const { data: dup, error: dupErr } = await client
+      .from("reservations")
+      .select("id")
+      .eq("class_id", classId)
+      .eq("member_id", next.member_id)
+      .eq("status", "confirmed")
+      .maybeSingle();
+    if (dupErr) throw dupErr;
+
+    let promoted: Reservation | null = null;
+    if (!dup) {
+      const { data: created, error: createErr } = await client
+        .from("reservations")
+        .insert({
+          class_id: classId,
+          member_id: next.member_id,
+          member_name: next.member_name,
+          member_phone: next.member_phone,
+          status: "confirmed",
+        })
+        .select("*")
+        .single();
+      if (createErr) throw createErr;
+      promoted = rowToReservation(created);
+    }
+
+    // 대기 → 전환 처리
+    const { error: convErr } = await client
+      .from("waitlist")
+      .update({ status: "converted" })
+      .eq("id", next.id);
+    if (convErr) throw convErr;
+
+    // 남은 대기 순번 재정렬
+    const { data: remaining, error: remErr } = await client
+      .from("waitlist")
+      .select("*")
+      .eq("class_id", classId)
+      .in("status", ["waiting", "called"])
+      .order("position", { ascending: true });
+    if (remErr) throw remErr;
+    let pos = 1;
+    for (const w of remaining ?? []) {
+      if (w.position !== pos) {
+        const { error } = await client
+          .from("waitlist")
+          .update({ position: pos })
+          .eq("id", w.id);
+        if (error) throw error;
+      }
+      pos += 1;
+    }
+
+    return promoted;
   },
 
   async listWaitlist(classId: string): Promise<WaitlistEntry[]> {
@@ -773,7 +909,7 @@ export function createReservation(
   return impl().createReservation(classId, member);
 }
 
-export function cancelReservation(id: string): Promise<void> {
+export function cancelReservation(id: string): Promise<Reservation | null> {
   return impl().cancelReservation(id);
 }
 

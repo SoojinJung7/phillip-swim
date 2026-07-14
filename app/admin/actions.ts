@@ -15,7 +15,7 @@ import {
   cancelReservation,
   callNextWaitlist,
 } from "@/lib/data";
-import { notifyWaitlistCalled } from "@/lib/notify";
+import { notifyWaitlistCalled, notifyReservationConfirmed } from "@/lib/notify";
 import type { SwimClass, WaitlistEntry } from "@/lib/types";
 
 export type ClassFormState = { error?: string };
@@ -112,7 +112,11 @@ export async function cancelReservationAction(
   reservationId: string
 ): Promise<void> {
   await assertAdmin();
-  await cancelReservation(reservationId);
+  // 취소로 자리가 나면 대기 1번이 자동 예약전환됩니다. 전환되면 확정 알림톡 발송.
+  const promoted = await cancelReservation(reservationId);
+  if (promoted) {
+    await notifyReservationConfirmed(promoted);
+  }
   revalidatePath(`/admin/classes/${classId}`);
   revalidatePath("/admin");
 }
